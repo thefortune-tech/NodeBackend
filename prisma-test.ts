@@ -12,9 +12,13 @@ const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const users = await prisma.users.findMany();
+ const user = await prisma.users.findUnique({
+  where: {
+    id: 1,
+  },
+});
 
-  console.log(users);
+console.log(user);
 }
 
 main()
