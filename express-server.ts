@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
+import { Prisma } from "./generated/prisma/client.js";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -118,8 +119,71 @@ app.post("/users", async(req, res,next) => {
   }
 });
 
+app.post("/users/:id/posts", async (req, res, next) => {
+  try {
+    const userId = Number(req.params.id);
+    const { title } = req.body ?? {};
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      res.status(400).json({ message: "Invalid user ID" });
+      return;
+    }
+
+    if (typeof title !== "string" || !title.trim()) {
+      res.status(400).json({ message: "A post title is required" });
+      return;
+    }
+
+    const newPost = await prisma.posts.create({
+      data: {
+        title: title.trim(),
+        user: {
+          connect: { id: userId },
+        },
+      },
+    });
+
+    res.status(201).json(newPost);
+  } catch (error) {
+    next(error);
+  }
+});
 
 
+app.get("/users/:id/posts", async (req, res, next) => {
+  try {
+    const userId = Number(req.params.id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      res.status(400).json({ message: "Invalid user ID" });
+      return;
+    }
+
+    const posts = await prisma.posts.findMany({
+      where: {
+        userId: userId,
+      },
+    });
+
+    res.status(200).json(posts);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/posts", async (req, res, next) => {
+  try {
+    const posts = await prisma.posts.findMany({
+      include: {
+        user: true,
+      },
+    });
+
+    res.status(200).json(posts);
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.patch("/users/:id", async(req, res,next) => {
   const id = Number(req.params.id);
@@ -132,15 +196,15 @@ app.patch("/users/:id", async(req, res,next) => {
   
 
   if (name===undefined && email===undefined) {
-    res.status(404).json({ message: "Invalid user ID" });
-    return;
+    return res.status(400).json({ message: "Provide a name or email to update" });
+    ;
   }
 
   
 
   if(name !== undefined && 
     (typeof name !== "string"|| !name.trim())){
-      res.status(400).json({message:"Invalid name "})
+      return res.status(400).json({message:"Invalid name "})
     }
 
   if (email !== undefined) {
@@ -161,7 +225,7 @@ app.patch("/users/:id", async(req, res,next) => {
     }
   })
   res.json({
-    message:"User successful",
+    message:"User updated successfully",
     user: updateUser
   })
  }catch(error){
@@ -200,13 +264,36 @@ app.get("/test-error", (req, res, next) => {
   next(new Error("Something failed during processing"));
 });
 
-app.use((err:Error,req:express.Request,res:express.Response,next:express.NextFunction)=>{
+app.use((
+  err: unknown,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => {
   console.error(err);
-  res.status(500).json({
-    message:"Something went wrong on the server"
-  })
-})
 
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === "P2025") {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (err.code === "P2002") {
+      return res.status(409).json({
+        message: "A record with this value already exists",
+      });
+    }
+  }
+
+  return res.status(500).json({
+    message: "Something went wrong on the server",
+  });
+});
 const PORT=Number(process.env.PORT)||4000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
