@@ -1,14 +1,22 @@
-
+import { PrismaClient } from "./generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
 
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not configured");
+}
+
+const adapter = new PrismaPg({ connectionString });
+const prisma = new PrismaClient({ adapter });
+
 const app = express();
 app.use(express.json());
 
-app.use(cors({
-  origin:"http://localhost:5173"
-}))
+app.use(cors({origin:"http://localhost:5173"}))
 
 
 app.use((req, res,next)=>{
@@ -45,30 +53,41 @@ app.get("/products", (req, res) => {
   res.send("Here are all my products");
 });
 
-app.get("/users", (req, res) => {
-  res.json(users);
+app.get("/users",async (req, res,next) => {
+  try{
+    const users=await prisma.users.findMany();
+    res.json(users)
+  }catch(error){
+    next(error)
+  }
 });
 
-app.get("/users/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const user = users.find((item) => item.id === id);
+app.get("/users/:id", async(req,res, next )=>{
+  const id=Number(req.params.id);
 
-  if (!Number.isInteger(id) || id <= 0) {
-    res.status(400).json({ message: "Invalid user ID" });
+  if(!Number.isInteger(id) || id<=0){
+    res.status(400).json({message:"Invaild user ID"});
     return;
   }
 
-  if (!user) {
-    res.status(404).json({ message: "User not found" });
-    return;
+  try{
+    const user=await prisma.users.findUnique({
+      where:{id}
+    });
+    if(!user){
+      res.status(404).json({message:"User not found"});
+      return;
+    }
+
+    res.json(user);
+  }catch(error){
+    next(error)
   }
-
-  res.json(user);
-});
+})
 
 
 
-app.post("/users", (req, res) => {
+app.post("/users", async(req, res,next) => {
   const { name, email } = req.body;
 
   if (
@@ -83,54 +102,46 @@ app.post("/users", (req, res) => {
     return;
   }
 
-  const newUser = {
-    id: Math.max(0, ...users.map((user) => user.id)) + 1,
-    name: name.trim(),
-    email: email.trim()
-  };
-
-  users.push(newUser);
-
-  res.status(201).json({
-    message: "User created successfully",
-    user: newUser
-  });
+  try{
+    const newUser=await prisma.users.create({
+      data:{
+        name:name.trim(),
+        email:email.trim()
+      }
+    });
+    res.status(201).json({
+      message:"User created successfully",
+      user:newUser,
+    });
+  }catch(error){
+    next(error)
+  }
 });
 
 
 
 
-app.patch("/users/:id", (req, res) => {
+app.patch("/users/:id", async(req, res,next) => {
   const id = Number(req.params.id);
-  const user = users.find((item) => item.id === id);
+  const {name,email}=req.body;
 
   if (!Number.isInteger(id) || id <= 0) {
     res.status(400).json({ message: "Invalid user ID" });
     return;
   }
+  
 
-  if (!user) {
-    res.status(404).json({ message: "User not found" });
+  if (name===undefined && email===undefined) {
+    res.status(404).json({ message: "Invalid user ID" });
     return;
   }
 
-  const { name, email } = req.body;
+  
 
-  if (name === undefined && email === undefined) {
-    res.status(400).json({
-      message: "Provide a name or email to update"
-    });
-    return;
-  }
-
-  if (name !== undefined) {
-    if (typeof name !== "string" || !name.trim()) {
-      res.status(400).json({ message: "Invalid name" });
-      return;
+  if(name !== undefined && 
+    (typeof name !== "string"|| !name.trim())){
+      res.status(400).json({message:"Invalid name "})
     }
-
-    user.name = name.trim();
-  }
 
   if (email !== undefined) {
     if (typeof email !== "string" || !email.trim()) {
@@ -138,43 +149,52 @@ app.patch("/users/:id", (req, res) => {
       return;
     }
 
-    user.email = email.trim();
+    
   }
 
+ try{
+  const updateUser=await prisma.users.update({
+    where:{id},
+    data:{
+      ...(name !== undefined && {name:name.trim()}),
+      ...(email !== undefined && {email: email.trim()})
+    }
+  })
   res.json({
-    message: "User updated successfully",
-    user
-  });
+    message:"User successful",
+    user: updateUser
+  })
+ }catch(error){
+  next(error)
+ }
 });
 
 
 
-app.delete("/users/:id", (req, res) => {
+
+app.delete("/users/:id", async (req, res, next) => {
   const id = Number(req.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
-    res.status(400).json({
-      message: "Invalid user ID"
-    });
+    res.status(400).json({ message: "Invalid user ID" });
     return;
   }
 
-  const userIndex = users.findIndex((user) => user.id === id);
-
-  if (userIndex === -1) {
-    res.status(404).json({
-      message: "User not found"
+  try {
+    const deletedUser = await prisma.users.delete({
+      where: { id },
     });
-    return;
+
+    res.json({
+      message: "User deleted successfully",
+      user: deletedUser,
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const deletedUser = users.splice(userIndex, 1)[0];
-
-  res.json({
-    message: "User deleted successfully",
-    user: deletedUser
-  });
 });
+
+
 
 app.get("/test-error", (req, res, next) => {
   next(new Error("Something failed during processing"));
@@ -187,7 +207,7 @@ app.use((err:Error,req:express.Request,res:express.Response,next:express.NextFun
   })
 })
 
-const PORT=Number(process.env.PORT)||3000;
+const PORT=Number(process.env.PORT)||4000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
