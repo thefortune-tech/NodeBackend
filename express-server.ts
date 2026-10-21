@@ -7,14 +7,10 @@ import userRoutes from "./routes/user-routes.js";
 import postRoutes from "./routes/post-routes.js";
 
 const app = express();
+app.use(cors({origin:"http://localhost:5173"}))
 app.use(express.json());
 app.use("/users", userRoutes);
 app.use("/", postRoutes);
-
-
-app.use(cors({origin:"http://localhost:5173"}))
-
-
 
 
 app.get("/test-error", (req, res, next) => {
